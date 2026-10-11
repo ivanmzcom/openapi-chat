@@ -52,7 +52,26 @@ while true {
     let messages = engine.messages
     for message in messages.dropFirst(printed + 1) {
         switch message.role {
-        case .toolCall(let status): print("  ⚙︎ \(message.detail ?? message.text) → \(status)")
+        case .toolCall(let status):
+            print("  ⚙︎ \(message.detail ?? message.text) → \(status)")
+            if args.contains("--verbose") {
+                switch message.presentation {
+                case .table(let table)?:
+                    print("    table \(table.title ?? "-"): \(table.rows.count) rows, columns \(table.columns), link \(table.linkColumn ?? "-")")
+                case .record(let fields)?:
+                    print("    record: \(fields.map(\.key))")
+                case .detail(let fields, let tables)?:
+                    print("    detail: \(fields.count) fields, lists \(tables.map { "\($0.title ?? "-")(\($0.rows.count))" })")
+                case nil:
+                    print("    (no presentation)")
+                }
+                if let chart = message.presentation?.chart {
+                    print("    chart \(chart.kind): \(chart.yKey) by \(chart.xKey), \(chart.points.count) points")
+                }
+                if let pagination = message.pagination {
+                    print("    more: next \(pagination.nextArguments.jsonString()), total \(pagination.total.map(String.init) ?? "?")")
+                }
+            }
         case .error: print("! \(message.text)")
         default: print(message.text)
         }

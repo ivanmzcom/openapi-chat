@@ -54,6 +54,46 @@ public struct OperationRouter: Sendable {
             .map { $0.count > 4 && $0.hasSuffix("s") ? String($0.dropLast()) : $0 }
     }
 
+    // MARK: Areas
+
+    /// The area an operation belongs to: its first tag, or its first meaningful path segment.
+    public static func area(of operation: APIOperation) -> String {
+        if let tag = operation.tags.first { return tag }
+        let segments = operation.path.split(separator: "/").filter {
+            !$0.hasPrefix("{") && !["api", "v1", "v2", "v3", "v4"].contains($0.lowercased())
+        }
+        return segments.first.map(String.init) ?? "general"
+    }
+
+    /// Asks the model which areas of the API the request is about and returns their operations.
+    func operationsInRelevantAreas(for question: String, context: String?, model: ModelChoice) async -> [APIOperation]? {
+        let groups = Dictionary(grouping: operations, by: Self.area)
+        guard groups.count >= 3 else { return nil }
+        let areas = groups.sorted { $0.value.count > $1.value.count }.prefix(80)
+        let catalog = areas.map { name, operations in
+            let examples = operations.compactMap(\.summary).prefix(3).map { String($0.prefix(40)) }.joined(separator: "; ")
+            return "- \(name): \(examples)"
+        }.joined(separator: "\n")
+        let choice = DynamicGenerationSchema(name: "Area", anyOf: areas.map(\.key))
+        let root = DynamicGenerationSchema(name: "Areas", properties: [
+            .init(name: "areas", description: "The 1-3 areas most related to the request",
+                  schema: DynamicGenerationSchema(arrayOf: choice, minimumElements: 1, maximumElements: 3)),
+        ])
+        do {
+            let schema = try GenerationSchema(root: root, dependencies: [])
+            let session = model.makeSession(instructions: "You classify user requests into areas of an API. The request may be in any language.")
+            var prompt = "API areas (with example operations):\n\(catalog)\n\n"
+            if let context, !context.isEmpty { prompt += "Recent conversation:\n\(context.suffix(1200))\n\n" }
+            prompt += "User request: \(question)"
+            let response = try await session.respond(to: prompt, schema: schema, options: GenerationOptions(temperature: 0))
+            let chosen = try response.content.value([String].self, forProperty: "areas")
+            let result = chosen.flatMap { groups[$0] ?? [] }
+            return result.isEmpty ? nil : result
+        } catch {
+            return nil
+        }
+    }
+
     // MARK: Model-based routing
 
     /// Asks the model which operations are needed. Works across languages (e.g. a Spanish
@@ -70,7 +110,16 @@ public struct OperationRouter: Sendable {
         guard operations.count > budget.maxTools else { return operations }
 
         let previous = previous.filter { operations.contains($0) }
-        let ranked = lexicalRank(question + " " + (context ?? "")).filter { !previous.contains($0) }
+        let query = question + " " + (context ?? "")
+        var ranked = lexicalRank(query)
+        // Big APIs don't fit in one catalog, and keywords fail across languages ("estrellas" vs "stars"):
+        // first let the model pick the relevant areas, then rank inside them.
+        if operations.count > budget.routerCatalogSize,
+           let inAreas = await operationsInRelevantAreas(for: question, context: context, model: model) {
+            ranked = OperationRouter(operations: inAreas).lexicalRank(query) + ranked
+        }
+        var seen = Set(previous.map(\.id))
+        ranked = ranked.filter { seen.insert($0.id).inserted }
         let candidates = Array((previous + ranked).prefix(budget.routerCatalogSize))
         let catalog = candidates.map { op in
             "- \(op.id): \(op.method) \(op.path)" + (op.summary.map { " — \($0.prefix(80))" } ?? "")

@@ -1,7 +1,8 @@
 import OpenAPIChatKit
 import SwiftUI
 
-/// Shows an API response as a table (lists) or a card (single objects), straight from the JSON.
+/// Shows an API response as a table (lists), a card (single objects), a detail (object + its lists)
+/// or a chart, straight from the JSON.
 struct ResultView: View {
     let presentation: ResultPresentation
     var pagination: Pagination?
@@ -10,13 +11,102 @@ struct ResultView: View {
     var body: some View {
         Group {
             switch presentation {
-            case .table(let table): ResultTableView(table: table, pagination: pagination, onLoadMore: onLoadMore)
-            case .record(let fields): ResultRecordView(fields: fields)
+            case .table(let table):
+                TableOrChart(table: table, pagination: pagination, onLoadMore: onLoadMore)
+            case .record(let fields):
+                RecordOrChart(fields: fields, chart: presentation.chart)
+            case .detail(let fields, let tables):
+                DetailView(fields: fields, tables: tables)
             }
         }
         .padding(10)
         .background(.background, in: .rect(cornerRadius: 12))
         .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(.quaternary))
+    }
+}
+
+/// Table/chart switch shown when the data has an obvious chart.
+private struct ViewModePicker: View {
+    @Binding var showsChart: Bool
+
+    var body: some View {
+        Picker("Vista", selection: $showsChart) {
+            Label("Tabla", systemImage: "tablecells").tag(false)
+            Label("Gráfica", systemImage: "chart.xyaxis.line").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .labelsHidden()
+        .fixedSize()
+    }
+}
+
+/// A list as a table, or as a chart when it has one. Time series open as a chart.
+private struct TableOrChart: View {
+    let table: ResultTable
+    var pagination: Pagination?
+    var onLoadMore: (() async -> Void)?
+    @State private var showsChart: Bool?
+
+    var body: some View {
+        let chart = ResultChart(table: table)
+        let chartSelected = chart != nil && (showsChart ?? (chart?.kind == .timeSeries))
+        VStack(alignment: .leading, spacing: 10) {
+            if chart != nil {
+                ViewModePicker(showsChart: Binding(get: { chartSelected }, set: { showsChart = $0 }))
+            }
+            if chartSelected, let chart {
+                ResultChartView(chart: chart)
+            } else {
+                ResultTableView(table: table, pagination: pagination, onLoadMore: onLoadMore)
+            }
+        }
+    }
+}
+
+/// An object's fields; objects made of numbers (e.g. counts by status) open as a chart.
+private struct RecordOrChart: View {
+    let fields: [ResultField]
+    let chart: ResultChart?
+    @State private var showsChart = true
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            if chart != nil {
+                ViewModePicker(showsChart: $showsChart)
+            }
+            if showsChart, let chart {
+                ResultChartView(chart: chart)
+            } else {
+                ResultRecordView(fields: fields)
+            }
+        }
+    }
+}
+
+/// An object with its own fields and several lists: fields on top, then one list at a time.
+private struct DetailView: View {
+    let fields: [ResultField]
+    let tables: [ResultTable]
+    @State private var selected = 0
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            if !fields.isEmpty {
+                ResultRecordView(fields: fields)
+                Divider()
+            }
+            if tables.count > 1 {
+                Picker("Lista", selection: $selected) {
+                    ForEach(tables.indices, id: \.self) { index in
+                        Text("\(ResultFormat.header(tables[index].title ?? "Lista")) (\(tables[index].rows.count))").tag(index)
+                    }
+                }
+                .pickerStyle(.menu)
+                .fixedSize()
+            }
+            TableOrChart(table: tables[min(selected, tables.count - 1)])
+                .id(selected)
+        }
     }
 }
 
@@ -183,17 +273,7 @@ enum ResultFormat {
         }
     }
 
-    private static let isoFull = ISO8601DateFormatter()
-    private static let isoFractional: ISO8601DateFormatter = {
-        let f = ISO8601DateFormatter()
-        f.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
-        return f
-    }()
-
     static func parseDate(_ s: String) -> Date? {
-        guard s.count >= 10, s.count <= 35, s.first?.isNumber == true, s.contains("-") else { return nil }
-        if let d = isoFull.date(from: s) ?? isoFractional.date(from: s) { return d }
-        if s.count == 10 { return try? Date(s + "T00:00:00Z", strategy: .iso8601) }
-        return nil
+        JSONValue.string(s).dateValue
     }
 }

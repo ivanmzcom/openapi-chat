@@ -61,6 +61,32 @@ struct RootView: View {
         .onAppear {
             if selection == nil { selection = library.apis.first?.id }
         }
+        .onOpenURL(perform: handle)
+    }
+
+    /// `openapichat://add?url=<spec URL>` adds an API;
+    /// `openapichat://ask?api=<name>&q=<question>[&new=1]` asks a question (e.g. from Shortcuts).
+    private func handle(_ url: URL) {
+        guard url.scheme == "openapichat", let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return }
+        let query = Dictionary((components.queryItems ?? []).map { ($0.name, $0.value ?? "") }, uniquingKeysWith: { _, last in last })
+        switch components.host {
+        case "add":
+            guard let specURL = query["url"].flatMap(URL.init(string:)) else { return }
+            Task {
+                if let api = try? await library.add(from: specURL) { selection = api.id }
+            }
+        case "ask":
+            let target = query["api"].flatMap { name in
+                library.apis.first { $0.name.localizedCaseInsensitiveContains(name) }
+            } ?? library.apis.first { $0.id == selection }
+            guard let api = target, let question = query["q"], !question.isEmpty,
+                  let engine = try? library.engine(for: api) else { return }
+            selection = api.id
+            if query["new"] == "1" { engine.reset() }
+            engine.send(question)
+        default:
+            break
+        }
     }
 
     private func remove(_ api: SavedAPI) {

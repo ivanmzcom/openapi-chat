@@ -15,6 +15,8 @@ struct OpenAPIChatApp: App {
         WindowGroup {
             RootView()
                 .environment(library)
+                // openapichat:// links go to the open window instead of creating a new one each time.
+                .handlesExternalEvents(preferring: ["*"], allowing: ["*"])
         }
         #if os(macOS)
         .defaultSize(width: 1000, height: 700)

@@ -10,6 +10,10 @@ Añades la spec (por URL, archivo o pegándola), configuras la autenticación qu
 - **Cada operación es una tool**: los parámetros y el body se convierten en un `GenerationSchema` dinámico, sin código por API.
 - **Autenticación según la spec**: API key (header, query o cookie), Bearer, HTTP Basic, OAuth 2 (token manual, client credentials o password) y OpenID Connect. Las credenciales se guardan en el llavero.
 - **Tablas nativas**: las respuestas se muestran como tabla o ficha directamente desde el JSON. El modelo solo escribe un resumen corto, lo que lo hace mucho más rápido.
+- **Gráficas**: si los datos tienen una gráfica evidente, se pueden ver así (Swift Charts):
+  - una fecha y un número (un historial de precios) se ven como línea temporal;
+  - etiquetas con un número, como barras.
+- **Fichas con varias listas**: un objeto con varias listas (por ejemplo, un Pokémon con stats, tipos y movimientos) se muestra como ficha con un selector de lista. El modelo recibe todas las listas.
 - **Paginación**: detecta `page`, `offset` y cursores, y añade un botón «Cargar más» que pide la página siguiente sin pasar por el modelo.
 - **Encadena llamadas**: los IDs y URLs de los resultados llegan intactos al modelo, que puede usarlos en la siguiente llamada (por ejemplo, listar productos y luego consultar el historial de uno).
 - **Pensado para un modelo pequeño**:
@@ -17,6 +21,7 @@ Añades la spec (por URL, archivo o pegándola), configuras la autenticación qu
   - describe los `{id}` sin documentar a partir del endpoint que los lista;
   - resume las respuestas grandes;
   - le da al modelo cifras ya calculadas (recuentos, mínimos y máximos).
+- **Corrige IDs cruzados**: si el modelo pone el ID de un elemento donde va el de su padre (`/stores/{id}/…`), la app lo detecta por los resultados anteriores y lo corrige antes de enviar la petición.
 - **Seguro por defecto**: pide confirmación antes de cualquier `POST`, `PUT`, `PATCH` o `DELETE`.
 
 ## Cómo funciona
@@ -70,6 +75,21 @@ cd Packages/OpenAPIChatKit
 swift test                        # tests unitarios
 LIVE_API_TESTS=1 swift test       # incluye llamadas reales a la demo de Petstore
 swift run openapi-chat https://petstore3.swagger.io/api/v3/openapi.json   # chat en la terminal
+```
+
+## Enlaces `openapichat://`
+
+Sirven para Atajos, scripts o pruebas automáticas:
+
+```sh
+open "openapichat://add?url=https://petstore3.swagger.io/api/v3/openapi.json"
+open "openapichat://ask?api=Petstore&q=¿Cuántas%20mascotas%20hay%20disponibles?&new=1"
+```
+
+En las compilaciones Debug, cada turno se registra en el log unificado:
+
+```sh
+/usr/bin/log stream --level debug --predicate 'subsystem == "OpenAPIChat"'
 ```
 
 ## Private Cloud Compute

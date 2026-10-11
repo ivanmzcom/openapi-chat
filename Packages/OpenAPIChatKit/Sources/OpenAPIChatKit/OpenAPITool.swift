@@ -22,6 +22,8 @@ public struct ToolCallEvent: Sendable {
     public var operation: APIOperation
     public var url: String?
     public var phase: Phase
+    /// The tool arguments of the call.
+    public var arguments: JSONValue = .object([:])
 }
 
 /// Executes API operations on behalf of the model and returns text the model can read.
@@ -34,6 +36,8 @@ public struct APIExecutor: Sendable {
     public var requiresConfirmation: Bool
     public var confirm: @Sendable (PendingAPICall) async -> Bool
     public var onEvent: @Sendable (ToolCallEvent) async -> Void
+    /// Lets the conversation fix model arguments before the request is built (see `PathRepair`).
+    public var repairArguments: @Sendable (APIOperation, JSONValue) async -> JSONValue
 
     public init(
         spec: APISpec,
@@ -44,7 +48,8 @@ public struct APIExecutor: Sendable {
         session: URLSession = .shared,
         requiresConfirmation: Bool = true,
         confirm: @escaping @Sendable (PendingAPICall) async -> Bool = { _ in true },
-        onEvent: @escaping @Sendable (ToolCallEvent) async -> Void = { _ in }
+        onEvent: @escaping @Sendable (ToolCallEvent) async -> Void = { _ in },
+        repairArguments: @escaping @Sendable (APIOperation, JSONValue) async -> JSONValue = { $1 }
     ) {
         self.spec = spec
         self.builder = RequestBuilder(baseURL: baseURL)
@@ -54,6 +59,7 @@ public struct APIExecutor: Sendable {
         self.requiresConfirmation = requiresConfirmation
         self.confirm = confirm
         self.onEvent = onEvent
+        self.repairArguments = repairArguments
     }
 
     /// - Parameter arguments: the raw tool arguments, used to build the next-page arguments.
@@ -65,7 +71,7 @@ public struct APIExecutor: Sendable {
             resolvedAuth = try await auth.resolve(spec.securityRequirements(for: operation))
             request = try builder.makeRequest(for: operation, input: input, auth: resolvedAuth)
         } catch {
-            await onEvent(ToolCallEvent(callID: callID, operation: operation, url: nil, phase: .failed(error.localizedDescription)))
+            await onEvent(ToolCallEvent(callID: callID, operation: operation, url: nil, phase: .failed(error.localizedDescription), arguments: arguments))
             return "Error: \(error.localizedDescription)"
         }
 
@@ -73,12 +79,12 @@ public struct APIExecutor: Sendable {
         if operation.isMutating && requiresConfirmation {
             let preview = request.httpBody.map { String(decoding: $0.prefix(600), as: UTF8.self) }
             guard await confirm(PendingAPICall(operation: operation, url: url, bodyPreview: preview)) else {
-                await onEvent(ToolCallEvent(callID: callID, operation: operation, url: url, phase: .declined))
+                await onEvent(ToolCallEvent(callID: callID, operation: operation, url: url, phase: .declined, arguments: arguments))
                 return "The user declined this request, so it was not sent. Do not retry it; tell the user it was cancelled."
             }
         }
 
-        await onEvent(ToolCallEvent(callID: callID, operation: operation, url: url, phase: .started))
+        await onEvent(ToolCallEvent(callID: callID, operation: operation, url: url, phase: .started, arguments: arguments))
         do {
             let (data, response) = try await session.data(for: request)
             let http = response as? HTTPURLResponse
@@ -96,21 +102,28 @@ public struct APIExecutor: Sendable {
                 : nil
             if let presentation = page?.presentation {
                 // The user already sees the data; give the model the same compact rows instead of the JSON.
-                text = "HTTP \(status). The app already shows this data to the user as a table/card. Data:\n"
+                text = "HTTP \(status). Data (the user can already see it; never mention how it is displayed):\n"
                     + presentation.modelText(maxCharacters: condenser.maxCharacters)
                 if let total = page?.pagination?.total ?? Pagination.findTotal(in: JSONValue.parseIfJSON(data, contentType: http?.value(forHTTPHeaderField: "Content-Type")) ?? .null) {
                     text += "\nTotal items reported by the API: \(total)"
                 }
+            }
+            // Say which path IDs produced this data, so follow-ups on its items reuse them
+            // instead of an ID of the same name taken from some other result.
+            let pathValues = input.parameters.filter { $0.parameter.location == .path }
+            if !pathValues.isEmpty, (200..<300).contains(status) {
+                let list = pathValues.map { "\($0.parameter.name)=\($0.value.scalarText)" }.joined(separator: ", ")
+                text += "\nThis data was requested with \(list). To query one of these items, use the same \(list)."
             }
             if let pagination = page?.pagination {
                 text += "\n" + pagination.hint(toolName: operation.id)
             }
             await onEvent(ToolCallEvent(callID: callID, operation: operation, url: url,
                                         phase: .finished(status: status, output: text, presentation: page?.presentation,
-                                                         pagination: page?.pagination)))
+                                                         pagination: page?.pagination), arguments: arguments))
             return text
         } catch {
-            await onEvent(ToolCallEvent(callID: callID, operation: operation, url: url, phase: .failed(error.localizedDescription)))
+            await onEvent(ToolCallEvent(callID: callID, operation: operation, url: url, phase: .failed(error.localizedDescription), arguments: arguments))
             return "Error: the request failed (\(error.localizedDescription))."
         }
     }
@@ -169,7 +182,7 @@ public struct OpenAPITool: Tool {
     }
 
     public func call(arguments: GeneratedContent) async throws -> String {
-        let json = arguments.jsonValue
+        let json = await executor.repairArguments(operation, arguments.jsonValue)
         return await executor.execute(operation, input: interface.requestInput(from: json), arguments: json)
     }
 

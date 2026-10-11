@@ -40,3 +40,25 @@ import Testing
         #expect(throws: OpenAPIError.self) { try APISpec(data: Data("openapi: 3.0.0\npaths: {}".utf8)) }
     }
 }
+
+@Suite struct JSONValueTests {
+    @Test func zeroAndOneStayNumbers() throws {
+        let json = try JSONValue.parse(Data(#"{"effort": 0, "slot": 1, "hidden": false, "default": true, "price": 1.5}"#.utf8))
+        #expect(json["effort"] == .number(0) && json["slot"] == .number(1))
+        #expect(json["hidden"] == .bool(false) && json["default"] == .bool(true))
+        #expect(json["price"] == .number(1.5))
+
+        let yaml = try JSONValue.parse(Data("count: 0\nenabled: true\n".utf8))
+        #expect(yaml["count"] == .number(0) && yaml["enabled"] == .bool(true))
+    }
+}
+
+@Suite struct InvalidSpecTests {
+    @Test func webPageIsExplained() {
+        #expect {
+            try APISpec(data: Data("<!doctype html><html><body>Hi</body></html>".utf8))
+        } throws: { error in
+            (error as? OpenAPIError)?.errorDescription?.contains("página web") == true
+        }
+    }
+}

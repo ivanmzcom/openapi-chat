@@ -16,6 +16,12 @@ targets:
     dependencies:
       - package: OpenAPIChatKit
         product: OpenAPIChatKit
+    info:
+      path: App/Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: com.ivanmz.OpenAPIChat
+            CFBundleURLSchemes: [openapichat]
     entitlements:
       path: App/OpenAPIChat.entitlements
       properties:

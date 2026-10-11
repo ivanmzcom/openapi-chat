@@ -56,7 +56,13 @@ private struct ConversationView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            if let reason = api.model.unavailableReason {
+            if api.baseURL.isEmpty {
+                Label("La spec no indica a qué servidor llamar. Añade la URL base en los ajustes de la API.", systemImage: "network.slash")
+                    .font(.callout)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(10)
+                    .background(.yellow.opacity(0.15))
+            } else if let reason = api.model.unavailableReason {
                 Label(reason, systemImage: "apple.intelligence")
                     .font(.callout)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -79,7 +85,8 @@ private struct ConversationView: View {
                     }
                     .padding()
                 }
-                .defaultScrollAnchor(.bottom)
+                // The welcome screen reads from the top; a conversation follows its latest message.
+                .defaultScrollAnchor(engine.messages.isEmpty ? .top : .bottom)
                 .onChange(of: engine.messages.last) {
                     withAnimation { proxy.scrollTo(engine.messages.last?.id, anchor: .bottom) }
                 }
@@ -126,7 +133,7 @@ private struct ConversationView: View {
         .buttonStyle(.plain)
         .foregroundStyle(.tint)
         .padding(10)
-        .disabled(api.model.unavailableReason != nil)
+        .disabled(api.model.unavailableReason != nil || api.baseURL.isEmpty)
         .onAppear { inputFocused = true }
     }
 

@@ -53,16 +53,15 @@ extension JSONValue {
         switch value {
         case nil, is NSNull:
             self = .null
-        case let number as NSNumber where CFGetTypeID(number) == CFBooleanGetTypeID():
-            self = .bool(number.boolValue)
+        // NSNumber first: it bridges to `Bool` too, which would turn every 0 and 1 into false/true.
+        case let number as NSNumber:
+            self = CFGetTypeID(number) == CFBooleanGetTypeID() ? .bool(number.boolValue) : .number(number.doubleValue)
         case let bool as Bool:
             self = .bool(bool)
         case let int as Int:
             self = .number(Double(int))
         case let double as Double:
             self = .number(double)
-        case let number as NSNumber:
-            self = .number(number.doubleValue)
         case let string as String:
             self = .string(string)
         case let date as Date:
@@ -89,6 +88,10 @@ extension JSONValue {
         }
         guard let text = String(data: data, encoding: .utf8) else {
             throw OpenAPIError.invalidDocument("El archivo no es texto UTF-8.")
+        }
+        let start = text.prefix(200).trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        if start.hasPrefix("<!doctype html") || start.hasPrefix("<html") {
+            throw OpenAPIError.invalidDocument("Esa URL devuelve una página web, no una spec. Busca la URL del archivo JSON o YAML (suele acabar en openapi.json, swagger.json u openapi.yaml).")
         }
         let yaml: Any?
         do {

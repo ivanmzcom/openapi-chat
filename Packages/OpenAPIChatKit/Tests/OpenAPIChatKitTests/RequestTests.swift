@@ -84,3 +84,54 @@ import Testing
         #expect(anonymous.missingSchemes.isEmpty)
     }
 }
+
+@Suite struct PathRepairTests {
+    let spec = try! APISpec(data: Data("""
+    openapi: 3.1.0
+    info: { title: Shops, version: "1" }
+    paths:
+      /stores/{id}/products:
+        get:
+          operationId: storeProducts
+          parameters: [{ name: id, in: path, required: true, schema: { type: string } }]
+          responses: {}
+      /stores/{id}/product:
+        get:
+          operationId: storeProduct
+          parameters:
+            - { name: id, in: path, required: true, schema: { type: string } }
+            - { name: url, in: query, schema: { type: string } }
+          responses: {}
+    """.utf8))
+
+    var previous: [PathRepair.PreviousCall] {
+        [PathRepair.PreviousCall(
+            operation: spec.operation(id: "storeProducts")!,
+            arguments: .object(["id": .string("store_A")]),
+            rows: [["id": .string("prod_1"), "name": .string("Kit"), "url": .string("https://shop/kit-1")],
+                   ["id": .string("prod_2"), "name": .string("Kit 2"), "url": .string("https://shop/kit-2")]]
+        )]
+    }
+
+    @Test func itemIDInParentSlotIsReplaced() {
+        let detail = spec.operation(id: "storeProduct")!
+        let fixed = PathRepair.repair(.object(["id": .string("prod_2"), "url": .string("https://x")]), for: detail, previous: previous)
+        #expect(fixed["id"] == .string("store_A"))
+        #expect(fixed["url"] == .string("https://x"))
+    }
+
+    @Test func parentIDFollowsTheReferencedItem() {
+        // The URL identifies an item listed under store_A, so a different store ID (e.g. taken from
+        // some other listing) is replaced.
+        let detail = spec.operation(id: "storeProduct")!
+        let fixed = PathRepair.repair(.object(["id": .string("store_X"), "url": .string("https://shop/kit-2")]), for: detail, previous: previous)
+        #expect(fixed["id"] == .string("store_A"))
+    }
+
+    @Test func otherValuesAreLeftAlone() {
+        let detail = spec.operation(id: "storeProduct")!
+        // Another store chosen on purpose: not an item of the previous result.
+        #expect(PathRepair.repair(.object(["id": .string("store_B")]), for: detail, previous: previous)["id"] == .string("store_B"))
+        #expect(PathRepair.repair(.object(["id": .string("store_A")]), for: detail, previous: previous)["id"] == .string("store_A"))
+    }
+}
