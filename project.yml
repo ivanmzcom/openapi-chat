@@ -1,0 +1,43 @@
+name: OpenAPIChat
+options:
+  bundleIdPrefix: com.ivanmz
+  deploymentTarget:
+    iOS: "27.0"
+    macOS: "27.0"
+  createIntermediateGroups: true
+packages:
+  OpenAPIChatKit:
+    path: Packages/OpenAPIChatKit
+targets:
+  OpenAPIChat:
+    type: application
+    supportedDestinations: [iOS, macOS]
+    sources: [App]
+    dependencies:
+      - package: OpenAPIChatKit
+        product: OpenAPIChatKit
+    entitlements:
+      path: App/OpenAPIChat.entitlements
+      properties:
+        com.apple.security.app-sandbox: true
+        com.apple.security.network.client: true
+        com.apple.security.files.user-selected.read-only: true
+        # Private Cloud Compute: uncomment this line and PRIVATE_CLOUD_COMPUTE below once Apple grants the entitlement.
+        # com.apple.developer.private-cloud-compute: true
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: com.ivanmz.OpenAPIChat
+        PRODUCT_NAME: OpenAPI Chat
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        SWIFT_VERSION: "6.0"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: OpenAPI Chat
+        INFOPLIST_KEY_UILaunchScreen_Generation: YES
+        INFOPLIST_KEY_UISupportedInterfaceOrientations: "UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_LSApplicationCategoryType: public.app-category.developer-tools
+        TARGETED_DEVICE_FAMILY: "1,2"
+        CODE_SIGN_STYLE: Automatic
+        SWIFT_DEFAULT_ACTOR_ISOLATION: MainActor
+        SWIFT_APPROACHABLE_CONCURRENCY: YES
+        # SWIFT_ACTIVE_COMPILATION_CONDITIONS: "$(inherited) PRIVATE_CLOUD_COMPUTE"
